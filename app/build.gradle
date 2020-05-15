@@ -3,11 +3,11 @@ apply plugin: 'com.android.application'
 android {
     compileSdkVersion 28
     defaultConfig {
-        applicationId "tw.com.bte.keytest"
-        minSdkVersion 25
+        applicationId 'tw.com.bte.keytest1'
+        minSdkVersion 24
         targetSdkVersion 28
         versionCode 1
-        versionName "1.0"
+        versionName '1.1'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -28,6 +28,7 @@ android {
             path file('src/main/cpp/CMakeLists.txt')
         }
     }
+    ndkVersion = '20.0.5594570'
 }
 
 dependencies {
