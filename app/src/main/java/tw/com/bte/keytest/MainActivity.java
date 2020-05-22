@@ -5,6 +5,9 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.DialogInterface;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
 import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
@@ -20,11 +23,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener{
-
+    private  static final String TAG = "KEYTEST";
     TextView tvMsg;
     private InputStream mInputStream;
     private OutputStream mOutputStream;
     private ReadThread mReadThread;
+    private QueryKeyThread mQueryKeyThread;
     private Button b_lshift;
     private Button b_rshift;
     private Button b_o;
@@ -61,6 +65,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private int nKeyRepeatCount = 0;
 
     private AlertDialog dialogQuit;
+
+    private HandlerKeyEvent mHandler;
+    private byte[] keybuffer = new byte[64];
+    private byte[] KeyStatus = new byte[13];
+    private byte[] KeySetStatus = new byte[13];
+    private Button[] KeyArray;
+    private byte cur_adc_value;
+    private byte adc_value;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -68,7 +80,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         plungerbar = (ProgressBar) findViewById(R.id.plungerbar);
         plungerbar.setProgress(100, true);
 
-        //Uart_Init();
+        Uart_Init();
+
+        mHandler = new HandlerKeyEvent();
+        mQueryKeyThread = new QueryKeyThread();
+        mQueryKeyThread.start();
+
         //Button btn = (Button) findViewById(R.id.button);
         /*
         btn.setOnClickListener(new View.OnClickListener() {
@@ -83,10 +100,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
         });
         */
-
-
         initKey();
 
+        KeyArray = new Button[]{b_lshift, b_rshift, b_up, b_down, b_left, b_right,
+                b_c, b_esc, b_voldown, b_enter, b_o, b_p, b_volup};
     }
 
     @Override
@@ -165,7 +182,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        Log.d("KEY", "Keycode:" + keyCode + " Event:" + event + " Repeat Count:" + event.getRepeatCount()) ;
+        Long tsLong = System.currentTimeMillis()/1000;
+        Log.d("KEY", tsLong.toString() + " Keycode:" + keyCode + " event: " + event) ;
         switch (event.getScanCode()){
             case SCANCODE_X:
                 b_lshift.setBackgroundResource(R.color.colorButtonClick);
@@ -221,7 +239,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 InputDevice.SOURCE_JOYSTICK &&
                 event.getAction() == MotionEvent.ACTION_MOVE) {
             float value = event.getAxisValue(MotionEvent.AXIS_RY);
-            Log.d("KEY", "RY: " + value);
+
+            //Log.d("KEY", "RY: " + value);
             tvADValue.setText(String.valueOf(value));
 
             if(value > 0.1){
@@ -315,7 +334,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private void Uart_Init(){
         try {
-            SerialPort serialPort = new SerialPort(new File("/dev/ttyS3"), 115200, 0);
+            SerialPort serialPort = new SerialPort(new File("/dev/ttyS1"), 115200, 0);
             mInputStream = serialPort.getInputStream();
             mOutputStream = serialPort.getOutputStream();
             mReadThread = new ReadThread();
@@ -332,15 +351,79 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             while(!isInterrupted()){
                 int size;
                 try {
-                    byte[] buffer = new byte[64];
                     if (mInputStream == null) return;
-                    size = mInputStream.read(buffer);
-                    if (size > 0) {
-                        Log.d("UART_R", String.format("%02X %02X %02X %02X %02X %02X %02X %02X %02X", buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], buffer[8]));
+                    size = mInputStream.read(keybuffer);
+                    if ((keybuffer[0] == (byte) 0xA7) && keybuffer[1] == 0x10) {
+                        mHandler.sendEmptyMessage(0);
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
                     return;
+                }
+            }
+        }
+    }
+
+    private class QueryKeyThread extends Thread {
+        public boolean bReadKey = true;
+        private final byte[] data = new byte[]{(byte) 0xA6, 0x01, 0x00};
+        @Override
+        public void run() {
+            while(bReadKey){
+                try{
+                    mOutputStream.write(data);
+                    Thread.sleep(10);
+                } catch (Exception e){
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    private class HandlerKeyEvent extends Handler{
+        @Override
+        public void handleMessage(Message msg) {
+            //Log.d("KEY", String.format("%02X, %02X", keybuffer[4] & 0x20, keybuffer[9] & 0x20));
+            KeyStatus[0] = (byte)((keybuffer[4] >> 5)& 0x01); //Flipper L
+            KeyStatus[1] = (byte) ((keybuffer[9] >> 5) & 0x01); //Flipper R
+            KeyStatus[2] = (byte)(keybuffer[5] & 0x01); // Key Up
+            KeyStatus[3] = (byte) ((keybuffer[5] >> 1) & 0x01); //Key Down
+            KeyStatus[4] = (byte) ((keybuffer[5] >> 2) & 0x01); //Key Left
+            KeyStatus[5] = (byte) ((keybuffer[5] >> 3) & 0x01); //Key Right
+            KeyStatus[6] = (byte) ((keybuffer[5] >> 4) & 0x01); //Key C
+            KeyStatus[7] = (byte) ((keybuffer[5] >> 5) & 0x01); //Key ESC
+            KeyStatus[8] = (byte) ((keybuffer[8] >> 5) & 0x01); //Key VolDown
+            KeyStatus[9] = (byte) (keybuffer[9] & 0x01); //Key Enter
+            KeyStatus[10] = (byte) ((keybuffer[9] >> 1) & 0x01); //Key Thumber
+            KeyStatus[11] = (byte) ((keybuffer[9] >> 2) & 0x01); //Key P
+            KeyStatus[12] = (byte) ((keybuffer[9] >> 3) & 0x01); //Key Volup
+
+            if(keybuffer[11] == 0x05){
+                cur_adc_value = keybuffer[12];
+                if(keybuffer[13] != 0){ //new mcu code, and adc lv is 0-31
+                    if(cur_adc_value != adc_value){
+                        adc_value = cur_adc_value;
+                        double mValue = adc_value/31.0;
+                        int progress = (int)(mValue * 100);
+                        plungerbar.setProgress(progress);
+                    }
+                } else { //old mcu code, and adc lv is 0-15
+                    adc_value = cur_adc_value;
+                    double mValue = adc_value/15;
+                    int progress = (int)(mValue * 100);
+                    plungerbar.setProgress(progress);
+                }
+            }
+
+            for(int i =0; i < 13; i ++){
+                if(KeyStatus[i] != KeySetStatus[i]){
+                    //update key status
+                    KeySetStatus[i] = KeyStatus[i];
+                    if(KeyStatus[i] == 1){
+                        KeyArray[i].setBackgroundResource(R.color.colorButtonClick);
+                    } else {
+                        KeyArray[i].setBackgroundResource(R.color.colorButton);
+                    }
                 }
             }
         }
